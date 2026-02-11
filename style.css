@@ -1,95 +1,184 @@
-body,
-html,
-#app {
-  margin: 0;
-  width: 100%;
-  height: 100%;
-  // background-image: url("https://images.pexels.com/photos/2961995/pexels-photo-2961995.jpeg?auto=compress&cs=tinysrgb&h=800&dpr=1");
-}
+/* ===== RESET & BASE ===== */
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-#app {
+html, body {
+  width: 100%; height: 100%;
   overflow: hidden;
-  touch-action: pan-up;
-  color: #ffffff;
-  font-family: "Montserrat", sans-serif;
-  text-align: center;
-  text-shadow: 0 0 5px #000000, 0 0 20px #000;
-  user-select: none;
-}
-
-#app h1 {
-  --fontSize: 50px;
-  --lineHeight: 70px;
-  width: auto;
-  height: calc(2 * var(--lineHeight));
-  line-height: var(--lineHeight);
-  margin: calc(50vh - var(--lineHeight)) auto 0;
-  font-size: var(--fontSize);
-}
-
-#app a {
-  margin-top: 10px;
-  display: inline-block;
-  text-decoration: none;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #000;
   color: #fff;
+  -webkit-font-smoothing: antialiased;
 }
 
-#app canvas {
-  display: block;
-  position: fixed;
-  z-index: -1;
-  top: 0;
+canvas#main-canvas { display: block; position: fixed; inset: 0; z-index: 0; }
+
+/* ===== LOADING SCREEN ===== */
+#loader {
+  position: fixed; inset: 0; z-index: 9999;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at center, #0a0e1a 0%, #000 80%);
+  transition: opacity 0.8s ease;
+}
+#loader.hidden { opacity: 0; pointer-events: none; }
+#loader h1 {
+  font-size: 1.6rem; font-weight: 300; letter-spacing: 0.35em;
+  text-transform: uppercase; margin-bottom: 2rem;
+  background: linear-gradient(135deg, #6ec1e4, #a78bfa, #f9a8d4);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.loader-bar-track {
+  width: 240px; height: 3px; border-radius: 3px;
+  background: rgba(255,255,255,0.08);
+}
+.loader-bar-fill {
+  height: 100%; width: 0%; border-radius: 3px;
+  background: linear-gradient(90deg, #6ec1e4, #a78bfa);
+  transition: width 0.3s ease;
 }
 
-@keyframes flap {
-  0%,
-  20%,
-  80%,
-  100% {
-    transform: scaleX(1) rotate(5deg);
-  }
-  50% {
-    transform: scaleX(0.7) rotate(7deg);
-  }
+/* ===== TOOLTIP ===== */
+#tooltip {
+  position: fixed; z-index: 100;
+  padding: 6px 14px; border-radius: 8px;
+  background: rgba(10, 14, 30, 0.85);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255,255,255,0.1);
+  font-size: 0.8rem; font-weight: 500; letter-spacing: 0.04em;
+  pointer-events: none; opacity: 0;
+  transition: opacity 0.2s ease;
+  white-space: nowrap;
 }
+#tooltip.visible { opacity: 1; }
 
-h1 {
-  text-align: center;
-  font-size: 2rem;
+/* ===== CONTROLS (top-right) ===== */
+.controls {
+  position: fixed; top: 20px; right: 20px; z-index: 50;
+  display: flex; gap: 10px;
 }
-
-h1 span {
-  display: inline-block;
-  animation: flap 0.75s infinite ease-in-out;
-}
-
-#controls {
-  position: fixed;
-  top: 10px;
-  left: 10px;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-}
-.btn {
-  background-color: rgba(0, 0, 0, 0.4);
-  border: none;
-  color: rgba(255, 255, 255, 0.4);
-  padding: 10px;
-  text-align: center;
-  text-decoration: none;
-  display: inline-block;
-  font-size: 16px;
-  margin: 2px 2px;
+.ctrl-btn {
+  width: 44px; height: 44px; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(10, 14, 30, 0.6);
+  backdrop-filter: blur(12px);
+  color: #fff; font-size: 1.1rem;
+  display: flex; align-items: center; justify-content: center;
   cursor: pointer;
-  border-radius: 5px;
-  transition: background-color 0.3s;
+  transition: background 0.25s, border-color 0.25s, transform 0.2s;
 }
-.btn:hover {
-  background-color: rgba(255, 255, 255, 0.2);
-  color: rgba(255, 255, 0, 1);
+.ctrl-btn:hover {
+  background: rgba(110, 193, 228, 0.15);
+  border-color: rgba(110, 193, 228, 0.4);
+  transform: scale(1.08);
 }
-#fullscreenBtn {
-  font-size: 20px;
-  z-index: 100;
+.ctrl-btn.active {
+  background: rgba(110, 193, 228, 0.2);
+  border-color: rgba(110, 193, 228, 0.5);
+}
+.ctrl-btn svg { width: 20px; height: 20px; }
+
+/* ===== PLANET INFO (top-left, shown when planet selected) ===== */
+#planet-info {
+  position: fixed; top: 24px; left: 24px; z-index: 50;
+  opacity: 0; transform: translateY(-8px);
+  transition: opacity 0.4s ease, transform 0.4s ease;
+  pointer-events: none;
+}
+#planet-info.visible { opacity: 1; transform: translateY(0); pointer-events: auto; }
+#planet-info h2 {
+  font-size: 1.8rem; font-weight: 600;
+  background: linear-gradient(135deg, #6ec1e4, #a78bfa);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+#planet-info p {
+  font-size: 0.82rem; font-weight: 300; color: rgba(255,255,255,0.55);
+  margin-top: 4px; max-width: 260px; line-height: 1.5;
+}
+
+/* ===== BOTTOM NAVIGATION ===== */
+#bottom-nav {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 50;
+  padding: 12px 0 max(12px, env(safe-area-inset-bottom));
+  background: linear-gradient(to top, rgba(5, 7, 16, 0.92) 60%, transparent);
+  backdrop-filter: blur(16px);
+}
+.nav-scroll {
+  display: flex; gap: 8px;
+  overflow-x: auto; overflow-y: hidden;
+  padding: 0 16px;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.nav-scroll::-webkit-scrollbar { display: none; }
+
+.planet-card {
+  flex: 0 0 auto;
+  width: 76px;
+  display: flex; flex-direction: column;
+  align-items: center; gap: 6px;
+  padding: 10px 6px 8px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.3s, border-color 0.3s, transform 0.25s;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.planet-card:hover {
+  background: rgba(255,255,255,0.04);
+  transform: translateY(-2px);
+}
+.planet-card.active {
+  background: rgba(110, 193, 228, 0.1);
+  border-color: rgba(110, 193, 228, 0.35);
+}
+.planet-card .thumb {
+  width: 46px; height: 46px; border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid rgba(255,255,255,0.08);
+  transition: border-color 0.3s;
+  display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.planet-card.active .thumb { border-color: rgba(110, 193, 228, 0.5); }
+.planet-card .thumb canvas { width: 100%; height: 100%; object-fit: cover; }
+.planet-card .name {
+  font-size: 0.65rem; font-weight: 500;
+  letter-spacing: 0.04em;
+  color: rgba(255,255,255,0.55);
+  transition: color 0.3s;
+  text-align: center;
+}
+.planet-card.active .name { color: #6ec1e4; }
+
+/* ===== BACK BUTTON ===== */
+#back-btn {
+  position: fixed; top: 24px; left: 50%; z-index: 50;
+  transform: translateX(-50%) translateY(-60px);
+  padding: 8px 22px; border-radius: 24px;
+  background: rgba(10, 14, 30, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: #fff; font-size: 0.78rem; font-weight: 500;
+  letter-spacing: 0.03em; cursor: pointer;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.35s ease, transform 0.35s ease, background 0.25s;
+}
+#back-btn.visible {
+  opacity: 1; pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+#back-btn:hover { background: rgba(110, 193, 228, 0.15); }
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 600px) {
+  .planet-card { width: 64px; }
+  .planet-card .thumb { width: 38px; height: 38px; }
+  .planet-card .name { font-size: 0.58rem; }
+  #planet-info h2 { font-size: 1.35rem; }
+  .controls { top: 14px; right: 14px; }
+  .ctrl-btn { width: 38px; height: 38px; font-size: 0.95rem; }
 }
