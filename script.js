@@ -29,7 +29,7 @@ const cubeTextureLoader = new THREE.CubeTextureLoader();
 // ── Configuration ────────────────────────────────────────────────────
 const CONFIG = {
   sunLightIntensity: 2.5,
-  ambientLightIntensity: 0.05, // Very dark space shadows
+  ambientLightIntensity: 0.1, // Increased slightly for visibility
   bloomStrength: 1.5,
   bloomRadius: 0.4,
   bloomThreshold: 0.85,
@@ -143,9 +143,13 @@ async function init() {
   sunLight.shadow.bias = -0.0001;
   scene.add(sunLight);
 
-  // Ambient: Very faint fill (Space is dark!)
+  // Ambient: Fill light (Space is dark, but not pitch black)
   const ambientLight = new THREE.AmbientLight(0xffffff, CONFIG.ambientLightIntensity);
   scene.add(ambientLight);
+
+  // Hemisphere Light for subtle gradient detail on dark side
+  const hemiLight = new THREE.HemisphereLight(0x0f1e3d, 0x050505, 0.2); // Blueish tint from stars
+  scene.add(hemiLight);
 
   // 6. Starfield (Multi-Layer)
   createStarfield();
@@ -388,10 +392,22 @@ function focusPlanet(index) {
 
   const targetObj = planetMeshes[index];
   const targetPos = targetObj.group.position;
-  const offset = targetObj.data.radius * 3.5 + 5;
+  const offsetDistance = targetObj.data.radius * 3.5 + 5;
 
-  // Smooth Fly-To
-  const endPos = new THREE.Vector3(targetPos.x + offset, targetPos.y + offset * 0.5, targetPos.z + offset);
+  // Calculate position between Planet and Sun (Sun is at 0,0,0)
+  // We want to be on the "day" side, looking at the planet.
+  // Vector from Planet to Sun = (0 - Px, 0 - Pz)
+  const angleToSun = Math.atan2(-targetPos.z, -targetPos.x);
+
+  // Offset angle slightly for a cinematic "crescent" view potential, or direct day view
+  // Let's go for a side-lit view (terminator) which looks best in 3D
+  const viewAngle = angleToSun + Math.PI * 0.15;
+
+  const endPos = new THREE.Vector3(
+    targetPos.x + Math.cos(viewAngle) * offsetDistance,
+    targetPos.y + offsetDistance * 0.3, // Slight elevation
+    targetPos.z + Math.sin(viewAngle) * offsetDistance
+  );
 
   gsap.to(camera.position, {
     duration: 2.0,
