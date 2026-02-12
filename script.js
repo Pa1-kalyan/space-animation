@@ -1,121 +1,118 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { GammaCorrectionShader } from 'three/addons/shaders/GammaCorrectionShader.js';
 
 /* ====================================================================
-   SOLAR SYSTEM EXPLORER: CINEMATIC REALISM UPGRADE
-   Features: PBR Materials, Realistic Lighting, HDR Environment, Bloom
+   DEEP SPACE CINEMATIC EXPERIENCE (INTERSTELLAR STYLE)
+   Features: Astronaut, Volumetric Nebulae, Galaxy, Film Grain, Bloom
    ==================================================================== */
 
 // ── Globals ──────────────────────────────────────────────────────────
-let scene, camera, renderer, controls;
-let composer;
-let raycaster, mouse;
-let planetMeshes = [];
-let orbitLines = [];
-let starSystem;
-let selectedPlanet = null;
-let hoveredPlanet = null;
-let isAnimating = false;
-let showOrbits = true;
-let soundOn = false;
-let autoRotate = true;
-
-const textureLoader = new THREE.TextureLoader();
-const cubeTextureLoader = new THREE.CubeTextureLoader();
+let scene, camera, renderer, composer, controls;
+let astronaut, mixer;
+let starSystem, nebulaSystem, galaxySystem;
+let clock = new THREE.Clock();
+let mouse = new THREE.Vector2();
 
 // ── Configuration ────────────────────────────────────────────────────
 const CONFIG = {
-  sunLightIntensity: 2.5,
-  ambientLightIntensity: 0.1, // Increased slightly for visibility
   bloomStrength: 1.5,
-  bloomRadius: 0.4,
-  bloomThreshold: 0.85,
-  orbitOpacity: 0.15,
-  starCount: 6000,
-  cameraFov: 45
+  bloomRadius: 0.5,
+  bloomThreshold: 0.2, // Lower threshold to catch nebula glow
+  filmGrain: 0.35,
+  starCount: 12000,
+  nebulaCount: 30,
+  cameraDriftSpeed: 0.05
 };
 
-// ── Real Texture URLs (CDN/GitHub Mirrors) ───────────────────────────
-const TEXTURES = {
-  sun: 'https://upload.wikimedia.org/wikipedia/commons/9/99/Map_of_the_full_sun.jpg',
-  mercury: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/mercury.jpg',
-  venus: 'https://upload.wikimedia.org/wikipedia/commons/1/1c/Venus-real_color.jpg',
-  earth: {
-    map: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_atmos_2048.jpg',
-    normal: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_normal_2048.jpg',
-    specular: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_specular_2048.jpg',
-    clouds: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/earth_clouds_2048.png'
+// ── Custom Shaders ───────────────────────────────────────────────────
+const FilmGrainShader = {
+  uniforms: {
+    "tDiffuse": { value: null },
+    "amount": { value: CONFIG.filmGrain },
+    "time": { value: 0.0 }
   },
-  mars: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/mars.jpg',
-  jupiter: 'https://upload.wikimedia.org/wikipedia/commons/e/e2/Jupiter.jpg',
-  saturn: {
-    map: 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Saturn_during_Equinox.jpg',
-    ring: 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/planets/saturn_ring.png'
-  },
-  uranus: 'https://upload.wikimedia.org/wikipedia/commons/3/3d/Uranus2.jpg',
-  neptune: 'https://upload.wikimedia.org/wikipedia/commons/5/56/Neptune_Full.jpg'
+  vertexShader: `
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+        }
+    `,
+  fragmentShader: `
+        uniform float amount;
+        uniform float time;
+        uniform sampler2D tDiffuse;
+        varying vec2 vUv;
+        float random( vec2 p ) {
+            vec2 K1 = vec2( 23.14069263277926, 2.665144142690225 );
+            return fract( cos( dot(p,K1) ) * 12345.6789 );
+        }
+        void main() {
+            vec4 color = texture2D( tDiffuse, vUv );
+            vec2 uvRandom = vUv;
+            uvRandom.y *= random(vec2(uvRandom.y, time));
+            color.rgb += random(uvRandom) * amount;
+            gl_FragColor = vec4( color.rgb, color.a );
+        }
+    `
 };
 
-const PLANET_DATA = [
-  { name: 'Sun', radius: 12, distance: 0, speed: 0.0005, texture: TEXTURES.sun, isSun: true, emissive: 0xffaa00, desc: 'The Star. A perfect sphere of hot plasma.' },
-  { name: 'Mercury', radius: 1, distance: 24, speed: 0.004, texture: TEXTURES.mercury, roughness: 1.0, desc: 'Smallest planet. Sun-scorched and cratered.' },
-  { name: 'Venus', radius: 1.8, distance: 36, speed: 0.002, texture: TEXTURES.venus, roughness: 1.0, desc: 'Hottest planet. Thick toxic atmosphere.' },
-  { name: 'Earth', radius: 2.0, distance: 52, speed: 0.003, texture: TEXTURES.earth, roughness: 0.6, desc: 'Our Home. The only known life in the universe.' },
-  { name: 'Mars', radius: 1.4, distance: 68, speed: 0.003, texture: TEXTURES.mars, roughness: 0.9, desc: 'The Red Planet. Dusty, cold, desert world.' },
-  { name: 'Jupiter', radius: 6.5, distance: 92, speed: 0.005, texture: TEXTURES.jupiter, roughness: 0.4, desc: 'Gas Giant. Massive storm "Great Red Spot".' },
-  { name: 'Saturn', radius: 5.5, distance: 124, speed: 0.004, texture: TEXTURES.saturn, roughness: 0.5, hasRing: true, desc: 'The Jewel. Stunning icy ring system.' },
-  { name: 'Uranus', radius: 3.5, distance: 156, speed: 0.003, texture: TEXTURES.uranus, roughness: 0.7, desc: 'Ice Giant. Tilted on its side. Coldest.' },
-  { name: 'Neptune', radius: 3.4, distance: 184, speed: 0.002, texture: TEXTURES.neptune, roughness: 0.7, desc: 'Windy World. Dark, cold, supersonic winds.' }
-];
-
-// ── Utility: Texture Fallback ────────────────────────────────────────
-// Generates a high-quality noise texture if CDN fails
-function createNoiseTexture(colorHex) {
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = colorHex; ctx.fillRect(0, 0, size, size);
-  // Add noise
-  for (let i = 0; i < 5000; i++) {
-    const x = Math.random() * size, y = Math.random() * size;
-    ctx.fillStyle = `rgba(255,255,255,${Math.random() * 0.1})`;
-    ctx.fillRect(x, y, 2, 2);
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  return tex;
-}
+const VignetteShader = {
+  uniforms: {
+    "tDiffuse": { value: null },
+    "offset": { value: 1.0 },
+    "darkness": { value: 1.2 }
+  },
+  vertexShader: `
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+        }
+    `,
+  fragmentShader: `
+        uniform float offset;
+        uniform float darkness;
+        uniform sampler2D tDiffuse;
+        varying vec2 vUv;
+        void main() {
+            vec4 texel = texture2D( tDiffuse, vUv );
+            vec2 uv = ( vUv - vec2( 0.5 ) ) * vec2( offset );
+            gl_FragColor = vec4( texel.rgb * ( 1.0 - dot( uv, uv ) * darkness ), texel.a );
+        }
+    `
+};
 
 // ── Init ─────────────────────────────────────────────────────────────
 init();
 animate();
 
 async function init() {
-  // 1. Scene & Camera
+  // 1. Scene Setup
   scene = new THREE.Scene();
-  // Scene background: dark space color (fog handles depth)
-  scene.background = new THREE.Color(0x020205);
-  scene.fog = new THREE.FogExp2(0x020205, 0.001);
+  scene.background = new THREE.Color(0x000000); // Pure black base
+  scene.fog = new THREE.FogExp2(0x000005, 0.002); // Deep blue-black fog
 
-  camera = new THREE.PerspectiveCamera(CONFIG.cameraFov, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(40, 60, 140); // Standard view
+  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 0, 15); // Start close to astronaut
 
   // 2. Renderer (High Quality)
-  renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" }); // AA handled by composer
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMappingExposure = 0.9;
   document.body.prepend(renderer.domElement);
 
-  // 3. Post-Processing (Bloom for Sun/Glow)
+  // 3. Post-Processing Pipeline
   composer = new EffectComposer(renderer);
+
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
 
@@ -125,391 +122,251 @@ async function init() {
   bloomPass.radius = CONFIG.bloomRadius;
   composer.addPass(bloomPass);
 
-  // 4. Controls
+  const grainPass = new ShaderPass(FilmGrainShader);
+  grainPass.uniforms["amount"].value = CONFIG.filmGrain;
+  composer.addPass(grainPass);
+
+  const vignettePass = new ShaderPass(VignetteShader);
+  vignettePass.uniforms["darkness"].value = 1.1;
+  composer.addPass(vignettePass);
+
+  const gammaCorrection = new ShaderPass(GammaCorrectionShader);
+  composer.addPass(gammaCorrection);
+
+  // 4. Controls (Cinematic)
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
-  controls.dampingFactor = 0.05;
-  controls.enablePan = false; // Keep focus on center
-  controls.minDistance = 15;
-  controls.maxDistance = 500;
+  controls.dampingFactor = 0.02; // Very heavy, slow damping
+  controls.enablePan = false;
+  controls.minDistance = 5;
+  controls.maxDistance = 50;
+  controls.autoRotate = true;
+  controls.autoRotateSpeed = 0.2; // Slow drift
 
-  // 5. Lighting (Realistic)
-  // Primary Light: The Sun (PointLight)
-  const sunLight = new THREE.PointLight(0xffffff, CONFIG.sunLightIntensity, 400, 1.5);
-  sunLight.position.set(0, 0, 0);
-  sunLight.castShadow = true;
-  sunLight.shadow.mapSize.width = 2048;
-  sunLight.shadow.mapSize.height = 2048;
-  sunLight.shadow.bias = -0.0001;
-  scene.add(sunLight);
+  // 5. Lighting
+  // Key Light (Distant Star) - Warm
+  const keyLight = new THREE.DirectionalLight(0xffaa33, 3.0);
+  keyLight.position.set(5, 5, 10);
+  scene.add(keyLight);
 
-  // Ambient: Fill light (Space is dark, but not pitch black)
-  const ambientLight = new THREE.AmbientLight(0xffffff, CONFIG.ambientLightIntensity);
-  scene.add(ambientLight);
+  // Rim Light (Blue/Cold) - Backlight
+  const rimLight = new THREE.SpotLight(0x4455ff, 5.0);
+  rimLight.position.set(-5, 0, -5);
+  rimLight.lookAt(0, 0, 0);
+  scene.add(rimLight);
 
-  // Hemisphere Light for subtle gradient detail on dark side
-  const hemiLight = new THREE.HemisphereLight(0x0f1e3d, 0x050505, 0.2); // Blueish tint from stars
-  scene.add(hemiLight);
+  // Fill (Very subtle purple)
+  const fillLight = new THREE.PointLight(0x330044, 1.0, 20);
+  fillLight.position.set(0, -5, 0);
+  scene.add(fillLight);
 
-  // 6. Starfield (Multi-Layer)
+  // 6. Environment Buildup
   createStarfield();
+  createNebulae();
+  createGalaxy();
 
-  // 7. Planets
-  raycaster = new THREE.Raycaster();
-  mouse = new THREE.Vector2();
-  await createPlanets();
+  // 7. Load Astronaut
+  await loadAstronaut();
 
   // 8. Event Listeners
   window.addEventListener('resize', onResize);
-  renderer.domElement.addEventListener('mousemove', onMouseMove);
-  renderer.domElement.addEventListener('click', onClick);
-  renderer.domElement.addEventListener('touchend', onClick);
-  document.getElementById('back-btn').addEventListener('click', resetCamera);
-  document.getElementById('btn-orbits').addEventListener('click', toggleOrbits);
-  document.getElementById('btn-sound').addEventListener('click', toggleSound);
-
-  createNavUI();
+  document.getElementById('loader').classList.add('hidden'); // Hide loader when ready (or after delay)
 }
 
-// ── Starfield ────────────────────────────────────────────────────────
-function createStarfield() {
-  const count = 8000;
-  const positions = [];
-  const colors = [];
-  const sizes = [];
+// ── Astronaut ────────────────────────────────────────────────────────
+async function loadAstronaut() {
+  const loader = new GLTFLoader();
+  // Using a reliable public domain model (Neil Armstrong / Spacesuit)
+  const url = 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/NeilArmstrong.glb';
 
-  // Color palette for stars (blue, white, yellow, red-ish)
-  const starColors = [new THREE.Color(0x9bb0ff), new THREE.Color(0xffffff), new THREE.Color(0xfff4e8), new THREE.Color(0xffd2a1)];
+  return new Promise((resolve) => {
+    loader.load(url, (gltf) => {
+      astronaut = gltf.scene;
+      astronaut.scale.set(1, 1, 1);
+      astronaut.position.set(0, -1, 0);
 
-  for (let i = 0; i < count; i++) {
-    // Spherical distribution
-    const r = 300 + Math.random() * 600; // Far background
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-
-    const x = r * Math.sin(phi) * Math.cos(theta);
-    const y = r * Math.sin(phi) * Math.sin(theta);
-    const z = r * Math.cos(phi);
-
-    positions.push(x, y, z);
-
-    const color = starColors[Math.floor(Math.random() * starColors.length)];
-    colors.push(color.r, color.g, color.b);
-
-    // Size variation
-    sizes.push(Math.random() < 0.1 ? 2.5 : 1.0); // 10% large stars
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  geo.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
-
-  // Custom shader material for twinkling stars could go here, but PointsMaterial is performant
-  const mat = new THREE.PointsMaterial({
-    size: 1.0,
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.9,
-    sizeAttenuation: true
-  });
-
-  starSystem = new THREE.Points(geo, mat);
-  scene.add(starSystem);
-}
-
-// ── Planet Creation ──────────────────────────────────────────────────
-async function createPlanets() {
-  const sphereGeo = new THREE.SphereGeometry(1, 64, 64); // Base geometry for cloning
-
-  for (let i = 0; i < PLANET_DATA.length; i++) {
-    const data = PLANET_DATA[i];
-    const group = new THREE.Group();
-
-    // Initial Position (Random angle for variety)
-    const angle = Math.random() * Math.PI * 2;
-    group.position.x = Math.cos(angle) * data.distance;
-    group.position.z = Math.sin(angle) * data.distance;
-
-    // PBR Material Setup
-    let material;
-
-    if (data.isSun) {
-      // Emissive Sun
-      material = new THREE.MeshBasicMaterial({
-        map: await loadTex(data.texture),
-        color: new THREE.Color(data.emissive).multiplyScalar(10) // Boost brightness for bloom
-      });
-      // Sun Glow Sprite
-      const spriteMat = new THREE.SpriteMaterial({
-        map: new THREE.CanvasTexture(generateGlowTexture()),
-        color: 0xffaa00,
-        blending: THREE.AdditiveBlending,
-        transparent: true,
-        opacity: 0.5
-      });
-      const sprite = new THREE.Sprite(spriteMat);
-      sprite.scale.set(data.radius * 6, data.radius * 6, 1);
-      group.add(sprite);
-    } else {
-      // Standard PBR Planet
-      const texMap = data.name === 'Earth' || data.name === 'Saturn' ? data.texture.map : data.texture;
-
-      material = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        roughness: data.roughness || 0.5,
-        metalness: 0.1,
-        map: await loadTex(texMap)
+      // Apply better PBR properties to existing materials
+      astronaut.traverse((child) => {
+        if (child.isMesh) {
+          child.material.envMapIntensity = 1.0;
+          child.material.metalness = 0.6;
+          child.material.roughness = 0.4;
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
       });
 
-      // Earth Special: Normal, Specular, Clouds
-      if (data.name === 'Earth') {
-        material.normalMap = await loadTex(data.texture.normal);
-        material.roughnessMap = await loadTex(data.texture.specular); // Inverse specular -> roughness approximately
-        material.roughness = 0.8;
+      scene.add(astronaut);
 
-        // Clouds
-        const cloudGeo = new THREE.SphereGeometry(data.radius * 1.005, 64, 64);
-        const cloudMat = new THREE.MeshStandardMaterial({
-          map: await loadTex(data.texture.clouds),
-          transparent: true,
-          opacity: 0.8,
-          blending: THREE.AdditiveBlending,
-          side: THREE.DoubleSide
-        });
-        const clouds = new THREE.Mesh(cloudGeo, cloudMat);
-        group.add(clouds);
-      }
-    }
-
-    const mesh = new THREE.Mesh(sphereGeo, material);
-    mesh.scale.set(data.radius, data.radius, data.radius);
-    mesh.castShadow = !data.isSun;
-    mesh.receiveShadow = !data.isSun;
-    mesh.userData = { id: i, name: data.name, description: data.desc };
-    group.add(mesh);
-
-    // Ring (Saturn)
-    if (data.hasRing) {
-      const ringGeo = new THREE.RingGeometry(data.radius * 1.4, data.radius * 2.2, 128);
-      const pos = ringGeo.attributes.position;
-      const uv = ringGeo.attributes.uv;
-      // UV mapping for ring texture
-      for (let k = 0; k < pos.count; k++) {
-        const x = pos.getX(k), y = pos.getY(k);
-        const d = Math.sqrt(x * x + y * y);
-        const min = data.radius * 1.4;
-        const max = data.radius * 2.2;
-        uv.setXY(k, (d - min) / (max - min), 0.5);
+      // Setup simple idle animation if present, otherwise procedural float
+      mixer = new THREE.AnimationMixer(astronaut);
+      if (gltf.animations.length > 0) {
+        // Try to find a subtle idle
+        const clip = gltf.animations[0];
+        const action = mixer.clipAction(clip);
+        action.play();
+        action.timeScale = 0.5; // Slow motion breathing
       }
 
-      const ringMat = new THREE.MeshStandardMaterial({
-        map: await loadTex(data.texture.ring),
-        color: 0xffffff,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.85
-      });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      ring.rotation.x = -Math.PI / 2;
-      ring.receiveShadow = true;
-      ring.castShadow = true;
-      group.add(ring);
-    }
-
-    // Orbit Trail
-    if (data.distance > 0) {
-      const curve = new THREE.EllipseCurve(0, 0, data.distance, data.distance, 0, 2 * Math.PI, false, 0);
-      const points = curve.getPoints(128);
-      const geometry = new THREE.BufferGeometry().setFromPoints(points);
-      geometry.rotateX(Math.PI / 2); // Lay flat on XZ plane
-      const orbitMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: CONFIG.orbitOpacity });
-      const orbit = new THREE.Line(geometry, orbitMat);
-      orbitLines.push(orbit);
-      scene.add(orbit);
-    }
-
-    scene.add(group);
-    planetMeshes.push({ mesh, group, data, angle });
-
-    // Update Loader UI
-    document.getElementById('loader-fill').style.width = `${((i + 1) / PLANET_DATA.length) * 100}%`;
-  }
-
-  // Hide Loader
-  setTimeout(() => document.getElementById('loader').classList.add('hidden'), 500);
-}
-
-// ── Helpers ──────────────────────────────────────────────────────────
-function loadTex(url) {
-  if (!url) return null;
-  return new Promise(resolve => {
-    textureLoader.load(url, resolve, undefined, () => {
-      // Resolve with fallback noise texture on error
-      resolve(createNoiseTexture('#555555'));
+      resolve(astronaut);
+    }, undefined, (error) => {
+      console.error("Error loading astronaut", error);
+      resolve(null);
     });
   });
 }
 
-function generateGlowTexture() {
-  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
-  const ctx = c.getContext('2d');
-  const g = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
-  g.addColorStop(0, 'rgba(255, 230, 200, 1)');
-  g.addColorStop(0.4, 'rgba(255, 200, 100, 0.4)');
-  g.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 64, 64);
-  return c;
-}
+// ── Starfield (10k Particles) ────────────────────────────────────────
+function createStarfield() {
+  const geometry = new THREE.BufferGeometry();
+  const count = CONFIG.starCount;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
 
-// ── Interaction ──────────────────────────────────────────────────────
-function createNavUI() {
-  const scroll = document.getElementById('nav-scroll');
-  PLANET_DATA.forEach((data, i) => {
-    const card = document.createElement('div');
-    card.className = 'planet-card';
-    // Simple colored dot for thumbnail
-    const c = document.createElement('div');
-    c.style.cssText = `width:100%;height:100%;border-radius:50%;background:linear-gradient(45deg, #333, ${data.color || '#888'})`;
-    card.innerHTML = `<div class="thumb"><canvas width="40" height="40"></canvas></div><span class="name">${data.name}</span>`;
+  const color1 = new THREE.Color(0x9db4ff); // Blue-white
+  const color2 = new THREE.Color(0xfff4ea); // Yellow-white
+  const color3 = new THREE.Color(0xffc1c1); // Reddish
 
-    // Draw simple thumb
-    const cvs = card.querySelector('canvas');
-    const ctx = cvs.getContext('2d');
-    ctx.beginPath(); ctx.arc(20, 20, 16, 0, Math.PI * 2);
-    ctx.fillStyle = i === 0 ? '#fc3' : '#88a'; ctx.fill();
+  for (let i = 0; i < count; i++) {
+    // Uniform sphere distribution
+    const r = 40 + Math.random() * 300;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(2 * Math.random() - 1);
 
-    card.onclick = () => focusPlanet(i);
-    scroll.appendChild(card);
-  });
-}
+    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
+    positions[i * 3 + 2] = r * Math.cos(phi);
 
-function focusPlanet(index) {
-  if (isAnimating) return;
-  isAnimating = true;
-  selectedPlanet = index;
-  autoRotate = false; // Stop auto rotation when focused so user can inspect
+    const choice = Math.random();
+    const c = choice > 0.8 ? color1 : (choice > 0.4 ? color2 : color3);
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
 
-  const targetObj = planetMeshes[index];
-  const targetPos = targetObj.group.position;
-  const offsetDistance = targetObj.data.radius * 3.5 + 5;
-
-  // Calculate position between Planet and Sun (Sun is at 0,0,0)
-  // We want to be on the "day" side, looking at the planet.
-  // Vector from Planet to Sun = (0 - Px, 0 - Pz)
-  const angleToSun = Math.atan2(-targetPos.z, -targetPos.x);
-
-  // Offset angle slightly for a cinematic "crescent" view potential, or direct day view
-  // Let's go for a side-lit view (terminator) which looks best in 3D
-  const viewAngle = angleToSun + Math.PI * 0.15;
-
-  const endPos = new THREE.Vector3(
-    targetPos.x + Math.cos(viewAngle) * offsetDistance,
-    targetPos.y + offsetDistance * 0.3, // Slight elevation
-    targetPos.z + Math.sin(viewAngle) * offsetDistance
-  );
-
-  gsap.to(camera.position, {
-    duration: 2.0,
-    x: endPos.x, y: endPos.y, z: endPos.z,
-    ease: 'power3.inOut',
-    onUpdate: () => controls.update()
-  });
-
-  gsap.to(controls.target, {
-    duration: 2.0,
-    x: targetPos.x, y: targetPos.y, z: targetPos.z,
-    ease: 'power3.inOut',
-    onComplete: () => {
-      isAnimating = false;
-      updateUI(index);
-    }
-  });
-
-}
-
-function resetCamera() {
-  if (isAnimating) return;
-  isAnimating = true;
-  selectedPlanet = null;
-  autoRotate = true;
-
-  gsap.to(camera.position, { duration: 2, x: 40, y: 60, z: 140, ease: 'power3.inOut' });
-  gsap.to(controls.target, {
-    duration: 2, x: 0, y: 0, z: 0, ease: 'power3.inOut', onComplete: () => {
-      isAnimating = false;
-      updateUI(null);
-    }
-  });
-}
-
-function updateUI(index) {
-  const info = document.getElementById('planet-info');
-  const backBtn = document.getElementById('back-btn');
-
-  // Highlight Card
-  document.querySelectorAll('.planet-card').forEach((c, i) => c.classList.toggle('active', i === index));
-
-  if (index !== null) {
-    const data = PLANET_DATA[index];
-    document.getElementById('info-name').textContent = data.name;
-    document.getElementById('info-desc').textContent = data.desc;
-    info.classList.add('visible');
-    backBtn.classList.add('visible');
-  } else {
-    info.classList.remove('visible');
-    backBtn.classList.remove('visible');
+    sizes[i] = Math.random() * 0.5 + 0.1;
   }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+
+  // Custom shader material for twinkling
+  const material = new THREE.PointsMaterial({
+    size: 0.2,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.8,
+    sizeAttenuation: true
+  });
+
+  starSystem = new THREE.Points(geometry, material);
+  scene.add(starSystem);
 }
 
-function toggleOrbits() {
-  showOrbits = !showOrbits;
-  orbitLines.forEach(l => l.visible = showOrbits);
-  document.getElementById('btn-orbits').classList.toggle('active', showOrbits);
-}
+// ── Nebulae (Volumetric Sprites) ─────────────────────────────────────
+function createNebulae() {
+  const geometry = new THREE.BufferGeometry();
+  const count = CONFIG.nebulaCount;
+  const positions = [];
+  const colors = [];
 
-function toggleSound() {
-  const audio = document.getElementById('ambient-audio');
-  soundOn = !soundOn;
-  if (soundOn) { audio.volume = 0.3; audio.play().catch(() => { }); }
-  else audio.pause();
-  document.getElementById('btn-sound').classList.toggle('active', soundOn);
-}
+  // Cloud texture loader
+  const loader = new THREE.TextureLoader();
+  const texture = loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/sprites/cloud10.png');
 
-function onClick(e) {
-  if (isAnimating) return;
-  // Calculate mouse position in normalized device coordinates
-  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-  raycaster.setFromCamera(mouse, camera);
-
-  // Intersect strictly with planet meshes
-  const intersects = raycaster.intersectObjects(planetMeshes.map(p => p.mesh));
-  if (intersects.length > 0) {
-    const id = intersects[0].object.userData.id;
-    focusPlanet(id);
+  for (let i = 0; i < count; i++) {
+    // Random placement in distance
+    const x = (Math.random() - 0.5) * 100;
+    const y = (Math.random() - 0.5) * 60;
+    const z = (Math.random() - 0.5) * 60 - 50; // Push back
+    positions.push(x, y, z);
+    colors.push(Math.random(), Math.random(), Math.random());
   }
+
+  // Using Sprites for Nebulae is easier than points for "Cloud" look
+  nebulaSystem = new THREE.Group();
+  for (let i = 0; i < count; i++) {
+    const material = new THREE.SpriteMaterial({
+      map: texture,
+      color: Math.random() > 0.5 ? 0x220044 : 0x001133, // Purple / Deep Blue
+      transparent: true,
+      opacity: 0.05 + Math.random() * 0.1,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.position.set(
+      (Math.random() - 0.5) * 200,
+      (Math.random() - 0.5) * 100,
+      (Math.random() - 0.5) * 100 - 40
+    );
+    const scale = 40 + Math.random() * 60;
+    sprite.scale.set(scale, scale, 1);
+    sprite.rotation.z = Math.random() * Math.PI;
+    nebulaSystem.add(sprite);
+  }
+  scene.add(nebulaSystem);
 }
 
-function onMouseMove(e) {
-  mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-  mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
-  raycaster.setFromCamera(mouse, camera);
-  const intersects = raycaster.intersectObjects(planetMeshes.map(p => p.mesh));
+// ── Galaxy (Spiral) ──────────────────────────────────────────────────
+function createGalaxy() {
+  const params = {
+    count: 5000,
+    size: 0.2,
+    radius: 100,
+    branches: 3,
+    spin: 1,
+    randomness: 0.5,
+    randomnessPower: 3,
+    insideColor: '#ff6030',
+    outsideColor: '#1b3984'
+  };
 
-  const tooltip = document.getElementById('tooltip');
+  const geometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(params.count * 3);
+  const colors = new Float32Array(params.count * 3);
 
-  if (intersects.length > 0) {
-    document.body.style.cursor = 'pointer';
-    const name = intersects[0].object.userData.name;
-    tooltip.textContent = name;
-    tooltip.style.left = e.clientX + 15 + 'px';
-    tooltip.style.top = e.clientY + 'px';
-    tooltip.classList.add('visible');
-  } else {
-    document.body.style.cursor = 'default';
-    tooltip.classList.remove('visible');
+  const colorInside = new THREE.Color(params.insideColor);
+  const colorOutside = new THREE.Color(params.outsideColor);
+
+  for (let i = 0; i < params.count; i++) {
+    const i3 = i * 3;
+    const radius = Math.random() * params.radius;
+    const spinAngle = radius * params.spin;
+    const branchAngle = (i % params.branches) / params.branches * Math.PI * 2;
+
+    const randomX = Math.pow(Math.random(), params.randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
+    const randomY = Math.pow(Math.random(), params.randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
+    const randomZ = Math.pow(Math.random(), params.randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
+
+    positions[i3] = Math.cos(branchAngle + spinAngle) * radius + randomX;
+    positions[i3 + 1] = randomY; // Flat galaxy
+    positions[i3 + 2] = Math.sin(branchAngle + spinAngle) * radius + randomZ;
+
+    const mixedColor = colorInside.clone();
+    mixedColor.lerp(colorOutside, radius / params.radius);
+
+    colors[i3] = mixedColor.r;
+    colors[i3 + 1] = mixedColor.g;
+    colors[i3 + 2] = mixedColor.b;
   }
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  const material = new THREE.PointsMaterial({
+    size: params.size,
+    sizeAttenuation: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexColors: true
+  });
+
+  galaxySystem = new THREE.Points(geometry, material);
+  galaxySystem.position.set(-60, -30, -100); // Distance placement
+  galaxySystem.rotation.x = Math.PI / 3;
+  scene.add(galaxySystem);
 }
 
 function onResize() {
@@ -524,27 +381,31 @@ function animate() {
   requestAnimationFrame(animate);
 
   const delta = clock.getDelta();
+  const elapsed = clock.getElapsedTime();
 
-  // Rotate Planets around Sun
-  if (autoRotate && !selectedPlanet) {
-    planetMeshes.forEach(p => {
-      if (p.data.isSun) return;
-      p.angle += p.data.speed * 0.5; // Orbit speed
-      p.group.position.x = Math.cos(p.angle) * p.data.distance;
-      p.group.position.z = Math.sin(p.angle) * p.data.distance;
-    });
+  // 1. Astronaut Procedural Float
+  if (astronaut) {
+    astronaut.position.y = -1 + Math.sin(elapsed * 0.5) * 0.2; // Slow vertical drift
+    astronaut.rotation.y = Math.sin(elapsed * 0.2) * 0.1; // Slow yaw drift
+    astronaut.rotation.z = Math.cos(elapsed * 0.3) * 0.05; // Slow roll
+
+    if (mixer) mixer.update(delta);
   }
 
-  // Rotate Planets on axis
-  planetMeshes.forEach(p => {
-    if (p.mesh) p.mesh.rotation.y += 0.002;
-  });
+  // 2. Slow Galaxy Rotation
+  if (galaxySystem) {
+    galaxySystem.rotation.y += 0.0005;
+  }
 
-  // Animate Starfield slowly
-  if (starSystem) starSystem.rotation.y -= 0.0001;
+  // 3. Nebula Drift
+  if (nebulaSystem) {
+    nebulaSystem.rotation.z += 0.0002;
+  }
 
-  controls.update(); // Key for damping
+  // 4. Update Shader TimeUniforms
+  const grainPass = composer.passes.find(p => p.uniforms && p.uniforms.time);
+  if (grainPass) grainPass.uniforms.time.value = elapsed;
 
-  // Use composer for Bloom
+  controls.update();
   composer.render();
 }
