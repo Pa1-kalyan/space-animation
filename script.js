@@ -4,415 +4,318 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
-import { GammaCorrectionShader } from 'three/addons/shaders/GammaCorrectionShader.js';
 
 /* ====================================================================
-   DEEP SPACE CINEMATIC EXPERIENCE (INTERSTELLAR STYLE)
-   Features: Astronaut, Volumetric Nebulae, Galaxy, Film Grain, Bloom
+   CINEMATIC 3D SPACE EXPERIENCE
+   Features: High-Density Starfield, Nebula, Bloom, GSAP Fly-To
    ==================================================================== */
 
-// ── Globals ──────────────────────────────────────────────────────────
+// ── Global Variables ─────────────────────────────────────────────────
 let scene, camera, renderer, composer, controls;
-let astronaut, mixer;
-let starSystem, nebulaSystem, galaxySystem;
-let clock = new THREE.Clock();
+let starMesh, nebulaMesh;
+let planets = [];
+let astronaut;
+let raycaster = new THREE.Raycaster();
 let mouse = new THREE.Vector2();
 
 // ── Configuration ────────────────────────────────────────────────────
 const CONFIG = {
-  bloomStrength: 1.5,
-  bloomRadius: 0.5,
-  bloomThreshold: 0.2, // Lower threshold to catch nebula glow
-  filmGrain: 0.35,
-  starCount: 12000,
-  nebulaCount: 30,
-  cameraDriftSpeed: 0.05
+    starCount: 15000,
+    bloomStrength: 1.5,
+    bloomRadius: 0.4,
+    bloomThreshold: 0.1,
+    cameraFov: 60
 };
 
-// ── Custom Shaders ───────────────────────────────────────────────────
-const FilmGrainShader = {
-  uniforms: {
-    "tDiffuse": { value: null },
-    "amount": { value: CONFIG.filmGrain },
-    "time": { value: 0.0 }
-  },
-  vertexShader: `
-        varying vec2 vUv;
-        void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-        }
-    `,
-  fragmentShader: `
-        uniform float amount;
-        uniform float time;
-        uniform sampler2D tDiffuse;
-        varying vec2 vUv;
-        float random( vec2 p ) {
-            vec2 K1 = vec2( 23.14069263277926, 2.665144142690225 );
-            return fract( cos( dot(p,K1) ) * 12345.6789 );
-        }
-        void main() {
-            vec4 color = texture2D( tDiffuse, vUv );
-            vec2 uvRandom = vUv;
-            uvRandom.y *= random(vec2(uvRandom.y, time));
-            color.rgb += random(uvRandom) * amount;
-            gl_FragColor = vec4( color.rgb, color.a );
-        }
-    `
-};
+const PLANET_DATA = [
+    { name: 'Mercury', color: 0xA5A5A5, size: 2, distance: 30, position: { x: 30, y: 0, z: 0 } },
+    { name: 'Venus', color: 0xE3BB76, size: 3.5, distance: 45, position: { x: 50, y: 10, z: -20 } },
+    { name: 'Earth', color: 0x22A6B3, size: 4, distance: 60, position: { x: 0, y: 0, z: 0 } }, // Center focus
+    { name: 'Mars', color: 0xEB4D4B, size: 3, distance: 80, position: { x: -40, y: -10, z: 30 } },
+    { name: 'Jupiter', color: 0xD980FA, size: 8, distance: 120, position: { x: -80, y: 20, z: -50 } }
+];
 
-const VignetteShader = {
-  uniforms: {
-    "tDiffuse": { value: null },
-    "offset": { value: 1.0 },
-    "darkness": { value: 1.2 }
-  },
-  vertexShader: `
-        varying vec2 vUv;
-        void main() {
-            vUv = uv;
-            gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-        }
-    `,
-  fragmentShader: `
-        uniform float offset;
-        uniform float darkness;
-        uniform sampler2D tDiffuse;
-        varying vec2 vUv;
-        void main() {
-            vec4 texel = texture2D( tDiffuse, vUv );
-            vec2 uv = ( vUv - vec2( 0.5 ) ) * vec2( offset );
-            gl_FragColor = vec4( texel.rgb * ( 1.0 - dot( uv, uv ) * darkness ), texel.a );
-        }
-    `
-};
-
-// ── Init ─────────────────────────────────────────────────────────────
+// ── Initialization ───────────────────────────────────────────────────
 init();
 animate();
 
-async function init() {
-  // 1. Scene Setup
-  scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x050510); // Deep Blue instead of Black
-  scene.fog = new THREE.FogExp2(0x020215, 0.002); // Lighter fog
+function init() {
+    // 1. Scene Setup
+    scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x000000, 0.001); // Depth fog
 
-  camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-  camera.position.set(0, 0, 15); // Start close to astronaut
+    // 2. Camera
+    camera = new THREE.PerspectiveCamera(CONFIG.cameraFov, window.innerWidth / window.innerHeight, 0.1, 1000);
+    camera.position.set(0, 20, 100);
 
-  // 2. Renderer (High Quality)
-  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" }); // AA handled by composer
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 0.9;
-  document.body.prepend(renderer.domElement);
+    // 3. Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.2;
+    document.body.appendChild(renderer.domElement);
 
-  // 3. Post-Processing Pipeline
-  composer = new EffectComposer(renderer);
+    // 4. Post-Processing (Bloom)
+    composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
 
-  const renderPass = new RenderPass(scene, camera);
-  composer.addPass(renderPass);
-
-  const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.5, 0.4, 0.85);
-  bloomPass.threshold = CONFIG.bloomThreshold;
-  bloomPass.strength = CONFIG.bloomStrength;
-  bloomPass.radius = CONFIG.bloomRadius;
-  composer.addPass(bloomPass);
-
-  const grainPass = new ShaderPass(FilmGrainShader);
-  grainPass.uniforms["amount"].value = CONFIG.filmGrain;
-  composer.addPass(grainPass);
-
-  const vignettePass = new ShaderPass(VignetteShader);
-  vignettePass.uniforms["darkness"].value = 1.1;
-  composer.addPass(vignettePass);
-
-  const gammaCorrection = new ShaderPass(GammaCorrectionShader);
-  composer.addPass(gammaCorrection);
-
-  // 4. Controls (Cinematic)
-  controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.02; // Very heavy, slow damping
-  controls.enablePan = false;
-  controls.minDistance = 5;
-  controls.maxDistance = 50;
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = 0.2; // Slow drift
-
-  // 5. Lighting
-  // Key Light (Distant Star) - Warm
-  const keyLight = new THREE.DirectionalLight(0xffaa33, 3.0);
-  keyLight.position.set(5, 5, 10);
-  scene.add(keyLight);
-
-  // Rim Light (Blue/Cold) - Backlight
-  const rimLight = new THREE.SpotLight(0x4455ff, 5.0);
-  rimLight.position.set(-5, 0, -5);
-  rimLight.lookAt(0, 0, 0);
-  scene.add(rimLight);
-
-  // Fill (Very subtle purple)
-  const fillLight = new THREE.PointLight(0x330044, 1.0, 20);
-  fillLight.position.set(0, -5, 0);
-  scene.add(fillLight);
-
-  // Global Ambient (Safety for visibility)
-  // This ensures the scene is never fully black even if other lights fail
-  const ambientLight = new THREE.AmbientLight(0x111122, 0.5);
-  scene.add(ambientLight);
-
-  console.log("Deep Space Scene Initialized. If black, check local server.");
-
-  // 6. Environment Buildup
-  createStarfield();
-  createNebulae();
-  createGalaxy();
-
-  // 7. Load Astronaut
-  await loadAstronaut();
-
-  // 8. Event Listeners
-  window.addEventListener('resize', onResize);
-  document.getElementById('loader').classList.add('hidden'); // Hide loader when ready (or after delay)
-}
-
-// ── Astronaut ────────────────────────────────────────────────────────
-async function loadAstronaut() {
-  const loader = new GLTFLoader();
-  // Using a reliable public domain model (Neil Armstrong / Spacesuit)
-  const url = 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/NeilArmstrong.glb';
-
-  return new Promise((resolve) => {
-    loader.load(url, (gltf) => {
-      astronaut = gltf.scene;
-      astronaut.scale.set(1, 1, 1);
-      astronaut.position.set(0, -1, 0);
-
-      // Apply better PBR properties to existing materials
-      astronaut.traverse((child) => {
-        if (child.isMesh) {
-          child.material.envMapIntensity = 1.0;
-          child.material.metalness = 0.6;
-          child.material.roughness = 0.4;
-          child.castShadow = true;
-          child.receiveShadow = true;
-        }
-      });
-
-      scene.add(astronaut);
-
-      // Setup simple idle animation if present, otherwise procedural float
-      mixer = new THREE.AnimationMixer(astronaut);
-      if (gltf.animations.length > 0) {
-        // Try to find a subtle idle
-        const clip = gltf.animations[0];
-        const action = mixer.clipAction(clip);
-        action.play();
-        action.timeScale = 0.5; // Slow motion breathing
-      }
-
-      resolve(astronaut);
-    }, undefined, (error) => {
-      console.error("Error loading astronaut", error);
-      resolve(null);
-    });
-  });
-}
-
-// ── Starfield (10k Particles) ────────────────────────────────────────
-function createStarfield() {
-  const geometry = new THREE.BufferGeometry();
-  const count = CONFIG.starCount;
-  const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
-  const sizes = new Float32Array(count);
-
-  const color1 = new THREE.Color(0x9db4ff); // Blue-white
-  const color2 = new THREE.Color(0xfff4ea); // Yellow-white
-  const color3 = new THREE.Color(0xffc1c1); // Reddish
-
-  for (let i = 0; i < count; i++) {
-    // Uniform sphere distribution
-    const r = 40 + Math.random() * 300;
-    const theta = Math.random() * Math.PI * 2;
-    const phi = Math.acos(2 * Math.random() - 1);
-
-    positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
-    positions[i * 3 + 1] = r * Math.sin(phi) * Math.sin(theta);
-    positions[i * 3 + 2] = r * Math.cos(phi);
-
-    const choice = Math.random();
-    const c = choice > 0.8 ? color1 : (choice > 0.4 ? color2 : color3);
-    colors[i * 3] = c.r;
-    colors[i * 3 + 1] = c.g;
-    colors[i * 3 + 2] = c.b;
-
-    sizes[i] = Math.random() * 0.5 + 0.1;
-  }
-
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-
-  // Custom shader material for twinkling
-  const material = new THREE.PointsMaterial({
-    size: 0.2,
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.8,
-    sizeAttenuation: true
-  });
-
-  starSystem = new THREE.Points(geometry, material);
-  scene.add(starSystem);
-}
-
-// ── Nebulae (Volumetric Sprites) ─────────────────────────────────────
-function createNebulae() {
-  const geometry = new THREE.BufferGeometry();
-  const count = CONFIG.nebulaCount;
-  const positions = [];
-  const colors = [];
-
-  // Cloud texture loader
-  const loader = new THREE.TextureLoader();
-  const texture = loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/textures/sprites/cloud10.png');
-
-  for (let i = 0; i < count; i++) {
-    // Random placement in distance
-    const x = (Math.random() - 0.5) * 100;
-    const y = (Math.random() - 0.5) * 60;
-    const z = (Math.random() - 0.5) * 60 - 50; // Push back
-    positions.push(x, y, z);
-    colors.push(Math.random(), Math.random(), Math.random());
-  }
-
-  // Using Sprites for Nebulae is easier than points for "Cloud" look
-  nebulaSystem = new THREE.Group();
-  for (let i = 0; i < count; i++) {
-    const material = new THREE.SpriteMaterial({
-      map: texture,
-      color: Math.random() > 0.5 ? 0x220044 : 0x001133, // Purple / Deep Blue
-      transparent: true,
-      opacity: 0.05 + Math.random() * 0.1,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
-    });
-    const sprite = new THREE.Sprite(material);
-    sprite.position.set(
-      (Math.random() - 0.5) * 200,
-      (Math.random() - 0.5) * 100,
-      (Math.random() - 0.5) * 100 - 40
+    const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(window.innerWidth, window.innerHeight),
+        CONFIG.bloomStrength,
+        CONFIG.bloomRadius,
+        CONFIG.bloomThreshold
     );
-    const scale = 40 + Math.random() * 60;
-    sprite.scale.set(scale, scale, 1);
-    sprite.rotation.z = Math.random() * Math.PI;
-    nebulaSystem.add(sprite);
-  }
-  scene.add(nebulaSystem);
+    composer.addPass(bloomPass);
+
+    // 5. Controls
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.minDistance = 10;
+    controls.maxDistance = 500;
+    controls.enablePan = false;
+
+    // 6. Lighting
+    const ambientLight = new THREE.AmbientLight(0x404040, 2); // Soft fill
+    scene.add(ambientLight);
+
+    const sunLight = new THREE.PointLight(0xffffff, 3, 1000);
+    sunLight.position.set(100, 100, 100);
+    scene.add(sunLight);
+
+    // 7. Environment
+    createStarfield();
+    createBackground(); // Nebula-like
+    createPlanets();
+    loadAstronaut();
+
+    // 8. Interaction
+    window.addEventListener('resize', onResize);
+    setupHUD();
 }
 
-// ── Galaxy (Spiral) ──────────────────────────────────────────────────
-function createGalaxy() {
-  const params = {
-    count: 5000,
-    size: 0.2,
-    radius: 100,
-    branches: 3,
-    spin: 1,
-    randomness: 0.5,
-    randomnessPower: 3,
-    insideColor: '#ff6030',
-    outsideColor: '#1b3984'
-  };
+// ── Environment Functions ────────────────────────────────────────────
 
-  const geometry = new THREE.BufferGeometry();
-  const positions = new Float32Array(params.count * 3);
-  const colors = new Float32Array(params.count * 3);
+function createStarfield() {
+    const geometry = new THREE.BufferGeometry();
+    const positions = [];
+    const colors = [];
 
-  const colorInside = new THREE.Color(params.insideColor);
-  const colorOutside = new THREE.Color(params.outsideColor);
+    const colorPalette = [
+        new THREE.Color(0x9bb0ff), // Blue star
+        new THREE.Color(0xffffff), // White star
+        new THREE.Color(0xfff4e8)  // Yellowish
+    ];
 
-  for (let i = 0; i < params.count; i++) {
-    const i3 = i * 3;
-    const radius = Math.random() * params.radius;
-    const spinAngle = radius * params.spin;
-    const branchAngle = (i % params.branches) / params.branches * Math.PI * 2;
+    for (let i = 0; i < CONFIG.starCount; i++) {
+        const x = (Math.random() - 0.5) * 600;
+        const y = (Math.random() - 0.5) * 600;
+        const z = (Math.random() - 0.5) * 600;
+        positions.push(x, y, z);
 
-    const randomX = Math.pow(Math.random(), params.randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
-    const randomY = Math.pow(Math.random(), params.randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
-    const randomZ = Math.pow(Math.random(), params.randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * params.randomness * radius;
+        // Color variation
+        const color = colorPalette[Math.floor(Math.random() * colorPalette.length)];
+        colors.push(color.r, color.g, color.b);
+    }
 
-    positions[i3] = Math.cos(branchAngle + spinAngle) * radius + randomX;
-    positions[i3 + 1] = randomY; // Flat galaxy
-    positions[i3 + 2] = Math.sin(branchAngle + spinAngle) * radius + randomZ;
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
-    const mixedColor = colorInside.clone();
-    mixedColor.lerp(colorOutside, radius / params.radius);
+    const material = new THREE.PointsMaterial({
+        size: 0.5,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.8,
+        sizeAttenuation: true
+    });
 
-    colors[i3] = mixedColor.r;
-    colors[i3 + 1] = mixedColor.g;
-    colors[i3 + 2] = mixedColor.b;
-  }
+    starMesh = new THREE.Points(geometry, material);
+    scene.add(starMesh);
+}
 
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+function createBackground() {
+    // Cinematic Nebula procedural backup (if no HDRI)
+    // Using a large sphere with Noise texture or gradient
+    const geometry = new THREE.SphereGeometry(400, 32, 32);
+    // Invert geometry to see from inside
+    geometry.scale(-1, 1, 1);
 
-  const material = new THREE.PointsMaterial({
-    size: params.size,
-    sizeAttenuation: true,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    vertexColors: true
-  });
+    // Create a canvas texture for gradient nebula
+    const canvas = document.createElement('canvas');
+    canvas.width = 512; canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createLinearGradient(0, 0, 0, 512);
+    gradient.addColorStop(0, '#020024'); // Deep Blue
+    gradient.addColorStop(0.5, '#090979'); // Purple/Blue
+    gradient.addColorStop(1, '#2c003e'); // Dark Purple
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 512, 512);
 
-  galaxySystem = new THREE.Points(geometry, material);
-  galaxySystem.position.set(-60, -30, -100); // Distance placement
-  galaxySystem.rotation.x = Math.PI / 3;
-  scene.add(galaxySystem);
+    // Add some noise
+    for (let i = 0; i < 1000; i++) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${Math.random() * 0.05})`;
+        ctx.beginPath();
+        ctx.arc(Math.random() * 512, Math.random() * 512, Math.random() * 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.MeshBasicMaterial({ map: texture });
+
+    const bgMesh = new THREE.Mesh(geometry, material);
+    scene.add(bgMesh);
+}
+
+function createPlanets() {
+    const geometry = new THREE.SphereGeometry(1, 32, 32);
+
+    PLANET_DATA.forEach(data => {
+        const material = new THREE.MeshStandardMaterial({
+            color: data.color,
+            roughness: 0.7,
+            metalness: 0.2,
+            emissive: data.color,
+            emissiveIntensity: 0.2
+        });
+
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(data.position.x, data.position.y, data.position.z);
+        mesh.scale.set(data.size, data.size, data.size);
+        mesh.userData = { name: data.name };
+
+        // Add a "Glow" Sprite
+        const spriteMat = new THREE.SpriteMaterial({
+            map: new THREE.CanvasTexture(generateGlowTexture(data.color)),
+            color: data.color,
+            blending: THREE.AdditiveBlending,
+            transparent: true,
+            opacity: 0.7
+        });
+        const sprite = new THREE.Sprite(spriteMat);
+        sprite.scale.set(data.size * 3, data.size * 3, 1);
+        mesh.add(sprite);
+
+        scene.add(mesh);
+        planets.push(mesh);
+    });
+}
+
+function loadAstronaut() {
+    const loader = new GLTFLoader();
+    // Using simple placeholder box if model fails, but trying standard URL
+    loader.load('https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/gltf/NeilArmstrong.glb',
+        (gltf) => {
+            astronaut = gltf.scene;
+            astronaut.scale.set(1, 1, 1);
+            astronaut.position.set(10, 5, 10);
+            astronaut.rotation.y = Math.PI;
+            scene.add(astronaut);
+        },
+        undefined,
+        (error) => {
+            console.warn('Astronaut model could not be loaded. Using placeholder.', error);
+            // Placeholder
+            const geo = new THREE.BoxGeometry(2, 4, 1);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, metalness: 0.8, roughness: 0.2 });
+            astronaut = new THREE.Mesh(geo, mat);
+            astronaut.position.set(10, 5, 10);
+            scene.add(astronaut);
+        }
+    );
+}
+
+// ── Interact & Animation ─────────────────────────────────────────────
+
+function setupHUD() {
+    const items = document.querySelectorAll('.hud-item');
+    items.forEach(item => {
+        item.addEventListener('click', () => {
+            // UI Update
+            items.forEach(i => i.classList.remove('active'));
+            item.classList.add('active');
+
+            // 3D Update
+            const targetName = item.getAttribute('data-target');
+            flyToPlanet(targetName);
+        });
+    });
+}
+
+function flyToPlanet(name) {
+    const target = planets.find(p => p.userData.name === name);
+    if (!target) return;
+
+    // Calculate ideal camera position (offset)
+    // We want to be somewhat in front and above
+    const offset = 20;
+    const targetPos = target.position.clone();
+
+    // We can just add offset to Z for simplicity, or maintain current relative angle
+    // Let's do a fixed offset for cinematic stability
+    const camEndPos = new THREE.Vector3(targetPos.x, targetPos.y + 5, targetPos.z + offset);
+
+    // GSAP Sequence
+    // 1. Move Camera
+    gsap.to(camera.position, {
+        duration: 2.5,
+        x: camEndPos.x,
+        y: camEndPos.y,
+        z: camEndPos.z,
+        ease: 'power3.inOut',
+        onUpdate: () => controls.update() // Important for OrbitControls sync
+    });
+
+    // 2. Adjust LookAt (Controls Target)
+    gsap.to(controls.target, {
+        duration: 2.5,
+        x: targetPos.x,
+        y: targetPos.y,
+        z: targetPos.z,
+        ease: 'power3.inOut'
+    });
+}
+
+function generateGlowTexture(colorHex) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    // Convert hex to rgb for alpha
+    const c = new THREE.Color(colorHex);
+    gradient.addColorStop(0, `rgba(${c.r * 255}, ${c.g * 255}, ${c.b * 255}, 1)`);
+    gradient.addColorStop(0.5, `rgba(${c.r * 255}, ${c.g * 255}, ${c.b * 255}, 0.2)`);
+    gradient.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 64, 64);
+    return canvas;
 }
 
 function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setSize(window.innerWidth, window.innerHeight);
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// ── Animation Loop ───────────────────────────────────────────────────
 function animate() {
-  requestAnimationFrame(animate);
+    requestAnimationFrame(animate);
 
-  const delta = clock.getDelta();
-  const elapsed = clock.getElapsedTime();
+    const time = Date.now() * 0.0005;
 
-  // 1. Astronaut Procedural Float
-  if (astronaut) {
-    astronaut.position.y = -1 + Math.sin(elapsed * 0.5) * 0.2; // Slow vertical drift
-    astronaut.rotation.y = Math.sin(elapsed * 0.2) * 0.1; // Slow yaw drift
-    astronaut.rotation.z = Math.cos(elapsed * 0.3) * 0.05; // Slow roll
+    // Subtle star rotation
+    if (starMesh) starMesh.rotation.y = time * 0.05;
 
-    if (mixer) mixer.update(delta);
-  }
+    // Astronaut float
+    if (astronaut) {
+        astronaut.position.y += Math.sin(time * 2) * 0.01;
+        astronaut.rotation.z = Math.sin(time) * 0.05;
+    }
 
-  // 2. Slow Galaxy Rotation
-  if (galaxySystem) {
-    galaxySystem.rotation.y += 0.0005;
-  }
+    // Controls update
+    controls.update();
 
-  // 3. Nebula Drift
-  if (nebulaSystem) {
-    nebulaSystem.rotation.z += 0.0002;
-  }
-
-  // 4. Update Shader TimeUniforms
-  const grainPass = composer.passes.find(p => p.uniforms && p.uniforms.time);
-  if (grainPass) grainPass.uniforms.time.value = elapsed;
-
-  controls.update();
-  composer.render();
+    // Render with Bloom
+    composer.render();
 }

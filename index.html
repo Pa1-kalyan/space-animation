@@ -2,53 +2,67 @@
 <html lang="en">
 
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Deep Space Cinematic Experience</title>
-  <meta name="description" content="Immersive 3D space scene with astronaut, nebulae, and cinematic effects." />
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cinematic 3D Space</title>
+    <link rel="stylesheet" href="style.css">
 
-  <!-- Google Font -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300;400&display=swap" rel="stylesheet" />
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Exo+2:wght@300;600&display=swap"
+        rel="stylesheet">
 
-  <!-- Styles -->
-  <link rel="stylesheet" href="style.css" />
-
-  <!-- Import Map -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-      }
-    }
-  </script>
+    <!-- Import Map for Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 </head>
 
 <body>
 
-  <!-- Loading Screen -->
-  <div id="loader">
-    <h1>DEEP SPACE</h1>
-    <div class="loader-bar-track">
-      <div class="loader-bar-fill"></div>
+    <!-- WebGL Canvas comes here via Three.js -->
+
+    <!-- Cinematic Overlay -->
+    <div id="cinematic-overlay"></div>
+
+    <!-- HUD / Navigation -->
+    <div id="hud">
+        <div class="hud-track">
+            <!-- Items will be injected by JS or static -->
+            <div class="hud-item" data-target="Mercury">
+                <div class="hud-circle" style="background: #A5A5A5;"></div>
+                <span>MERCURY</span>
+            </div>
+            <div class="hud-item" data-target="Venus">
+                <div class="hud-circle" style="background: #E3BB76;"></div>
+                <span>VENUS</span>
+            </div>
+            <div class="hud-item active" data-target="Earth">
+                <div class="hud-circle" style="background: #22A6B3;"></div>
+                <span>EARTH</span>
+            </div>
+            <div class="hud-item" data-target="Mars">
+                <div class="hud-circle" style="background: #EB4D4B;"></div>
+                <span>MARS</span>
+            </div>
+            <div class="hud-item" data-target="Jupiter">
+                <div class="hud-circle" style="background: #D980FA;"></div>
+                <span>JUPITER</span>
+            </div>
+        </div>
     </div>
-  </div>
 
-  <!-- Cinematic Overlay UI -->
-  <div id="ui-layer">
-    <div id="title-card">
-      <h2>INTERSTELLAR VOYAGE</h2>
-      <p>System: Unknown Galaxy<br>Coordinates: 89.2.14</p>
-    </div>
-  </div>
+    <!-- GSAP CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 
-  <!-- GSAP (Optional but useful) -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
-
-  <!-- Main Logic -->
-  <script type="module" src="script.js"></script>
+    <!-- App Logic -->
+    <script type="module" src="script.js"></script>
 </body>
 
 </html>
