@@ -96,8 +96,8 @@ animate();
 async function init() {
   // 1. Scene Setup
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x000000); // Pure black base
-  scene.fog = new THREE.FogExp2(0x000005, 0.002); // Deep blue-black fog
+  scene.background = new THREE.Color(0x050510); // Deep Blue instead of Black
+  scene.fog = new THREE.FogExp2(0x020215, 0.002); // Lighter fog
 
   camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
   camera.position.set(0, 0, 15); // Start close to astronaut
@@ -159,6 +159,13 @@ async function init() {
   const fillLight = new THREE.PointLight(0x330044, 1.0, 20);
   fillLight.position.set(0, -5, 0);
   scene.add(fillLight);
+
+  // Global Ambient (Safety for visibility)
+  // This ensures the scene is never fully black even if other lights fail
+  const ambientLight = new THREE.AmbientLight(0x111122, 0.5);
+  scene.add(ambientLight);
+
+  console.log("Deep Space Scene Initialized. If black, check local server.");
 
   // 6. Environment Buildup
   createStarfield();

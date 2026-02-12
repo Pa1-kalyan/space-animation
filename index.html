@@ -4,19 +4,18 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Solar System Explorer — Interactive 3D</title>
-  <meta name="description"
-    content="Explore the solar system in an interactive 3D scene. Navigate between planets with smooth animations." />
+  <title>Deep Space Cinematic Experience</title>
+  <meta name="description" content="Immersive 3D space scene with astronaut, nebulae, and cinematic effects." />
 
   <!-- Google Font -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100;300;400&display=swap" rel="stylesheet" />
 
   <!-- Styles -->
   <link rel="stylesheet" href="style.css" />
 
-  <!-- Import Map for Three.js modules (Fixes missing OrbitControls) -->
+  <!-- Import Map -->
   <script type="importmap">
     {
       "imports": {
@@ -31,55 +30,24 @@
 
   <!-- Loading Screen -->
   <div id="loader">
-    <h1>Solar System</h1>
+    <h1>DEEP SPACE</h1>
     <div class="loader-bar-track">
-      <div class="loader-bar-fill" id="loader-fill"></div>
+      <div class="loader-bar-fill"></div>
     </div>
   </div>
 
-  <!-- Tooltip -->
-  <div id="tooltip"></div>
-
-  <!-- Planet Info -->
-  <div id="planet-info">
-    <h2 id="info-name"></h2>
-    <p id="info-desc"></p>
+  <!-- Cinematic Overlay UI -->
+  <div id="ui-layer">
+    <div id="title-card">
+      <h2>INTERSTELLAR VOYAGE</h2>
+      <p>System: Unknown Galaxy<br>Coordinates: 89.2.14</p>
+    </div>
   </div>
 
-  <!-- Back Button -->
-  <button id="back-btn">← Back to overview</button>
-
-  <!-- Controls -->
-  <div class="controls">
-    <button class="ctrl-btn active" id="btn-orbits" title="Toggle orbits">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <ellipse cx="12" cy="12" rx="10" ry="4" />
-        <ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(60 12 12)" />
-        <ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(120 12 12)" />
-      </svg>
-    </button>
-    <button class="ctrl-btn" id="btn-sound" title="Toggle ambient sound">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M11 5L6 9H2v6h4l5 4V5z" />
-        <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07" />
-      </svg>
-    </button>
-  </div>
-
-  <!-- Bottom Navigation -->
-  <nav id="bottom-nav">
-    <div class="nav-scroll" id="nav-scroll"></div>
-  </nav>
-
-  <!-- Ambient Sound -->
-  <audio id="ambient-audio" loop preload="none">
-    <source src="https://assets.mixkit.co/active_storage/sfx/212/212.wav" type="audio/wav" />
-  </audio>
-
-  <!-- GSAP (Global) -->
+  <!-- GSAP (Optional but useful) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 
-  <!-- Main Logic (Module) -->
+  <!-- Main Logic -->
   <script type="module" src="script.js"></script>
 </body>
 
